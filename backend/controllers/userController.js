@@ -1,69 +1,70 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const registerUser = async (req, res) => {
-  const { name, email, password, role } = req.body;
+const Borrow = require('../models/borrow'); 
+const Book = require('../models/book'); 
+const borrowBook = async (req, res) => {
+  const { bookId } = req.body;
 
   try {
-    const userExists = await User.findOne({ email });
-    if (userExists) return res.status(400).json({ message: 'Email already exists' });
+    const book = await Book.findById(bookId);
+    if (!book) return res.status(404).json({ message: 'Book not found' });
 
-   
-    const roleFromClient = req.body.role?.toLowerCase(); // ← هان
-const role = roleFromClient === 'admin' ? 'admin' : 'user';
+    if (book.copies < 1)
+      return res.status(400).json({ message: 'No available copies' });
 
-    const user = new User({
-      name,
-      email,
-      passwordHash: password,
-      role: userRole
+  
+    book.copies -= 1;
+    await book.save();
+
+
+    const borrow = await Borrow.create({
+      user: req.user.id,
+      book: book._id
     });
 
-    await user.save();
-
-    res.status(201).json({ message: 'User registered successfully', role: user.role });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(201).json(borrow);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
-const loginUser = async (req, res) => {
-  const { email, password } = req.body;
+
+const getMyBorrows = async (req, res) => {
   try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+    const borrows = await Borrow.find({ user: req.user.id })
+      .populate('book', 'title author')
+      .sort({ borrowDate: -1 });
 
-    const isMatch = await bcrypt.compare(password, user.passwordHash); 
+    res.json(borrows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
 
-    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
+const returnBook = async (req, res) => {
+  const borrowId = req.params.id;
 
-    const token = jwt.sign(
-      { id: user._id, email: user.email, role: user.role },    
-      process.env.JWT_SECRET,
-      { expiresIn: '1d' }
-    );
+  try {
+    
+    const borrowRequest = await Borrow.findById(borrowId);
+    
+    if (!borrowRequest) {
+      return res.status(404).json({ message: 'Borrow request not found' });
+    }
+            
+    if (borrowRequest.isReturned) {
+      return res.status(400).json({ message: 'Book already returned' });
+    }
 
-    res.json({ token });
+    borrowRequest.isReturned = true;
+    borrowRequest.returnedAt = new Date();
+
+    await borrowRequest.save();
+
+    res.json({ message: 'Book returned successfully', borrowRequest });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-module.exports = { registerUser, loginUser };
+module.exports = {borrowBook, getMyBorrows,  returnBook };
